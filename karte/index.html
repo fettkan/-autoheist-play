@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>AutoHeist – Map v9 Vorschau</title>
+<style>
+html,body{margin:0;height:100%;background:#0b1020;overflow:hidden;font-family:system-ui,sans-serif;color:#fff;touch-action:none;user-select:none;-webkit-user-select:none}
+#hud{position:fixed;left:8px;top:8px;font-size:12px;line-height:1.35;background:rgba(10,14,30,.55);padding:6px 8px;border-radius:8px;pointer-events:none}
+#lade{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;font-size:16px;background:#0b1020;z-index:5;text-align:center;padding:20px}
+.kn{position:fixed;bottom:18px;width:74px;height:74px;border-radius:50%;background:rgba(255,255,255,.16);border:2px solid rgba(255,255,255,.4);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600}
+#gas{right:18px}#bremse{right:104px}#li{left:18px}#re{left:104px}
+#opt{position:fixed;right:8px;top:8px;display:flex;gap:6px}
+#opt button{font:inherit;font-size:12px;color:#fff;background:rgba(10,14,30,.6);border:1px solid rgba(255,255,255,.35);border-radius:8px;padding:7px 9px}
+</style></head><body>
+<div id="lade">Map wird geladen …</div>
+<div id="hud"></div>
+<div id="opt"><button id="bNacht">Nacht</button><button id="bSicht">Sicht +</button><button id="bOrt">Ort ▸</button></div>
+<div class="kn" id="li">◀</div><div class="kn" id="re">▶</div><div class="kn" id="bremse">Bremse</div><div class="kn" id="gas">Gas</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// AutoHeist Map v9 – Vorschau: Plan (map_plan.json) + Objektarten aus Blender (map_objs.bin/json) als Instanzen, ein Auto zum Herumfahren.
+// Koordinaten: Blender/Plan (x Ost, y Nord, z hoch) -> three (x, z, -y).
+const $ = id => document.getElementById(id), V3 = (x, y, z) => new THREE.Vector3(x, z || 0, -y);
+const FARBE = {wasser:0x2f8fb0, meer:0x277d9c, gras:0x6f9450, sand:0xd8b77a, kai:0x7a7a80, asphalt:0x3a3e48, strich:0xeef0f2, downtown:0x80828c, wohnen:0xa4a7af, industrie:0x8f8d87, garten:0x86a85e, weg:0xd8b77a, pier:0x8f8d87, see:0x3ba0c4};
+const CH = 160, SICHT = [230, 330, 480]; let sichtI = 0, nacht = false;
+const renderer = new THREE.WebGLRenderer({antialias: true, powerPreference: 'high-performance'}); renderer.setPixelRatio(Math.min(devicePixelRatio, 2)); document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene(), cam = new THREE.PerspectiveCamera(46, 1, 1, 2500);
+const hemi = new THREE.HemisphereLight(0xffffff, 0x8a8f9c, 0.78), sonne = new THREE.DirectionalLight(0xfff2dc, 0.62); sonne.position.set(-0.5, 1, 0.35); scene.add(hemi, sonne);
+function licht(){ scene.background = new THREE.Color(nacht ? 0x0b1020 : 0x9ed3ee); scene.fog = new THREE.Fog(scene.background.getHex(), SICHT[sichtI] * 0.75, SICHT[sichtI] * 1.25); hemi.intensity = nacht ? 0.3 : 0.78; hemi.color.set(nacht ? 0x7f8fd0 : 0xffffff); sonne.intensity = nacht ? 0.08 : 0.62; }
+function groesse(){ renderer.setSize(innerWidth, innerHeight); cam.aspect = innerWidth / innerHeight; cam.updateProjectionMatrix(); } addEventListener('resize', groesse); groesse(); licht();
+const matL = new THREE.MeshPhongMaterial({vertexColors: true, flatShading: true, shininess: 0, specular: 0x000000}), matE = new THREE.MeshBasicMaterial({vertexColors: true, fog: true});
+function flach(farbe){ return new THREE.MeshPhongMaterial({color: farbe, flatShading: true, shininess: 0, specular: 0x000000, side: THREE.DoubleSide}); }
+// ---------- Boden aus dem Plan ----------
+function vieleck(poly, z0, z1, farbe){ const s = new THREE.Shape(poly.map(p => new THREE.Vector2(p[0], p[1]))); const g = new THREE.ExtrudeGeometry(s, {depth: z1 - z0, bevelEnabled: false}); const m = new THREE.Mesh(g, flach(farbe)); m.rotation.x = -Math.PI / 2; m.position.y = z0; scene.add(m); return m; }
+function streifen(liste, z, farbe, ueber){ const pos = []; for (const s of liste){ const ax = s.a[0], ay = s.a[1], bx = s.b[0], by = s.b[1], L = Math.hypot(bx - ax, by - ay), dx = (bx - ax) / L, dy = (by - ay) / L, u = ueber ? s.w / 2 : 0, nx = -dy * s.w / 2, ny = dx * s.w / 2;
+    const A = [ax - dx * u, ay - dy * u], B = [bx + dx * u, by + dy * u], zz = z + (s.t === 'kai' ? 0.9 : 0), q = [[A[0] - nx, A[1] - ny], [B[0] - nx, B[1] - ny], [B[0] + nx, B[1] + ny], [A[0] + nx, A[1] + ny]];
+    for (const i of [0, 1, 2, 0, 2, 3]) pos.push(q[i][0], zz, -q[i][1]); }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.computeVertexNormals(); const m = new THREE.Mesh(g, flach(farbe)); scene.add(m); return m; }
+function boden(P){
+  const w = new THREE.Mesh(new THREE.PlaneGeometry(9000, 9000), flach(FARBE.meer)); w.rotation.x = -Math.PI / 2; w.position.y = -0.7; scene.add(w);
+  vieleck(P.insel.map(p => [p[0] * 1.03, p[1] * 1.03]), -2, -0.45, FARBE.sand); vieleck(P.insel, -2, 0, FARBE.gras); vieleck(P.see, -0.4, 0.05, FARBE.see); vieleck(P.kai, -2, 0.9, FARBE.kai);
+  const h = P.hafen, tx = h.b[0] - h.a[0], ty = h.b[1] - h.a[1], tl = Math.hypot(tx, ty), nx = -ty / tl, ny = tx / tl;
+  streifen(h.piers.map(p => ({a: [p.p[0] - nx * 26, p.p[1] - ny * 26], b: [p.p[0] - nx * (p.l + 26), p.p[1] - ny * (p.l + 26)], w: p.w})), 0.88, FARBE.pier, false);
+  for (const z of ['downtown', 'wohnen', 'industrie']) streifen(P.bloecke.filter(b => b.z === z).map(b => ({a: [b.c[0] - b.s / 2, b.c[1]], b: [b.c[0] + b.s / 2, b.c[1]], w: b.s})), 0.15, FARBE[z], false);
+  streifen(P.bloecke.filter(b => b.z === 'wohnen' && !b.ort).map(b => ({a: [b.c[0] - b.s / 2 + 3, b.c[1]], b: [b.c[0] + b.s / 2 - 3, b.c[1]], w: b.s - 6})), 0.2, FARBE.garten, false);
+  streifen(P.wege, 0.09, FARBE.weg, true); streifen(P.strassen.filter(s => s.t !== 'rampe'), 0.06, FARBE.asphalt, true);
+  { const pos = []; for (const s of P.strassen.filter(s => s.t === 'rampe')){ const L = Math.hypot(s.b[0] - s.a[0], s.b[1] - s.a[1]), nx = -(s.b[1] - s.a[1]) / L * s.w / 2, ny = (s.b[0] - s.a[0]) / L * s.w / 2, q = [[s.a[0] - nx, s.a[1] - ny, s.za], [s.b[0] - nx, s.b[1] - ny, s.zb], [s.b[0] + nx, s.b[1] + ny, s.zb], [s.a[0] + nx, s.a[1] + ny, s.za]]; for (const i of [0, 1, 2, 0, 2, 3]) pos.push(q[i][0], q[i][2] + 0.06, -q[i][1]); }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.computeVertexNormals(); scene.add(new THREE.Mesh(g, flach(FARBE.asphalt))); }
+  // Bodenfelder und Linien (Hoefe, Parkplaetze, Stapelfelder, Kranbahn) - Farben = Spielpalette
+  const PAL = {beton_hell:0xc3c1ba, fliese:0xc9c4ba, gras_b:0x86a85e, asphalt:0x3a3e48, asphalt_hell:0x4d525e, beton:0xa3a19a, sand:0xd8b77a, bordstein:0xcfd1d6, markierung:0xeef0f2, linie_gelb:0xe3b53a};
+  for (const f of (P.flaechen || [])) vieleck(f.p, f.z - 0.25, f.z + 0.03, PAL[f.f] || 0x999999);
+  const lg = {}; for (const l of (P.linien || [])) (lg[l.f + '|' + l.z] = lg[l.f + '|' + l.z] || []).push(l);
+  for (const k in lg) streifen(lg[k], lg[k][0].z + 0.045, PAL[k.split('|')[0]] || 0xffffff, false);
+  const striche = []; for (const s of P.strassen){ const L = Math.hypot(s.b[0] - s.a[0], s.b[1] - s.a[1]), dx = (s.b[0] - s.a[0]) / L, dy = (s.b[1] - s.a[1]) / L; if (s.t === 'rampe') continue; for (let k = 10; k < L - 10; k += 7.5) striche.push({a: [s.a[0] + dx * k, s.a[1] + dy * k], b: [s.a[0] + dx * (k + 3), s.a[1] + dy * (k + 3)], w: 0.22, t: s.t}); }
+  streifen(striche, 0.075, FARBE.strich, false);
+}
+// ---------- Objektarten ----------
+const ART = {}, chunks = new Map(), gitter = new Map(); let PLAN = null;
+function arten(idx, buf){
+  for (const nm in idx){ const e = idx[nm], q = new Uint16Array(buf, e.o, e.nv * 3), c = new Uint8Array(buf, e.o + e.nv * 6, e.nv * 4), I = e.i32 ? new Uint32Array(buf.slice(e.o + e.nv * 10, e.o + e.nv * 10 + e.ni * 4)) : new Uint16Array(buf.slice(e.o + e.nv * 10, e.o + e.nv * 10 + e.ni * 2));
+    const pos = new Float32Array(e.nv * 3), col = new Float32Array(e.nv * 3), sp = [e.hi[0] - e.lo[0], e.hi[1] - e.lo[1], e.hi[2] - e.lo[2]];
+    for (let i = 0; i < e.nv; i++){ const x = e.lo[0] + q[i * 3] / 65535 * sp[0], y = e.lo[1] + q[i * 3 + 1] / 65535 * sp[1], z = e.lo[2] + q[i * 3 + 2] / 65535 * sp[2]; pos[i * 3] = x; pos[i * 3 + 1] = z; pos[i * 3 + 2] = -y; col[i * 3] = c[i * 4] / 255; col[i * 3 + 1] = c[i * 4 + 1] / 255; col[i * 3 + 2] = c[i * 4 + 2] / 255; }
+    const iL = [], iE = []; for (let t = 0; t < e.ni; t += 3) (c[I[t] * 4 + 3] > 127 ? iE : iL).push(I[t], I[t + 1], I[t + 2]);
+    const mk = ind => { if (!ind.length) return null; const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.BufferAttribute(col, 3)); g.setIndex(ind); return g; };
+    ART[nm] = {gL: mk(iL), gE: mk(iE), k: e.k, t: e.t, tri: e.ni / 3, r: Math.max(e.hi[0], -e.lo[0], e.hi[1], -e.lo[1])}; }
+}
+function setzen(P){
+  const je = new Map(); let n = 0, fehlt = {};
+  for (const o of P.objekte){ if (!ART[o.o]){ fehlt[o.o] = 1; continue; } const ck = Math.floor(o.x / CH) + ',' + Math.floor(o.y / CH), key = ck + '|' + o.o; if (!je.has(key)) je.set(key, []); je.get(key).push(o); n++;
+    const A = ART[o.o]; if (A.k.length && o.t !== 'mensch'){ const gk = Math.floor(o.x / 40) + ',' + Math.floor(o.y / 40); const R = A.r * o.s; for (let i = Math.floor((o.x - R) / 40); i <= Math.floor((o.x + R) / 40); i++) for (let j = Math.floor((o.y - R) / 40); j <= Math.floor((o.y + R) / 40); j++){ const k2 = i + ',' + j; if (!gitter.has(k2)) gitter.set(k2, []); gitter.get(k2).push(o); } } }
+  const M = new THREE.Matrix4(), Q = new THREE.Quaternion(), S = new THREE.Vector3(), Y = new THREE.Vector3(0, 1, 0);
+  for (const [key, L] of je){ const [ck, nm] = key.split('|'), A = ART[nm]; if (!chunks.has(ck)){ const g = new THREE.Group(); const [i, j] = ck.split(',').map(Number); g.userData = {x: (i + 0.5) * CH, y: (j + 0.5) * CH, tri: 0}; g.visible = false; scene.add(g); chunks.set(ck, g); }
+    const G = chunks.get(ck);
+    for (const [geo, mat] of [[A.gL, matL], [A.gE, matE]]){ if (!geo) continue; const im = new THREE.InstancedMesh(geo, mat, L.length); im.frustumCulled = false;
+      L.forEach((o, i) => { Q.setFromAxisAngle(Y, o.r); S.set(o.s, o.s, o.s); M.compose(V3(o.x, o.y, o.z), Q, S); im.setMatrixAt(i, M); }); G.add(im); }
+    G.userData.tri += A.tri * L.length; }
+  return {n, fehlt: Object.keys(fehlt)};
+}
+// ---------- Auto, Steuerung, Kollision ----------
+const auto = {x: -200, y: -75, a: 0, v: 0, z: 0}; let wagen = null; const taste = {};
+function innen(p, poly){ let c = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++){ const a = poly[i], b = poly[j]; if ((a[1] > p[1]) !== (b[1] > p[1]) && p[0] < a[0] + (p[1] - a[1]) * (b[0] - a[0]) / (b[1] - a[1])) c = !c; } return c; }
+function stoss(){ const L = gitter.get(Math.floor(auto.x / 40) + ',' + Math.floor(auto.y / 40)); if (!L) return false; let hit = false; const rad = 1.3;
+  for (const o of L){ const A = ART[o.o], c = Math.cos(-o.r), s = Math.sin(-o.r), dx = auto.x - o.x, dy = auto.y - o.y, lx = (dx * c - dy * s) / o.s, ly = (dx * s + dy * c) / o.s, r = rad / o.s; if (Math.abs(lx) > A.r + r || Math.abs(ly) > A.r + r) continue;
+    for (const k of A.k){ const qx = Math.max(k[0], Math.min(lx, k[2])), qy = Math.max(k[1], Math.min(ly, k[3])), ex = lx - qx, ey = ly - qy, d = Math.hypot(ex, ey); if (d < r){ let px, py; if (d > 1e-4){ px = ex / d * (r - d); py = ey / d * (r - d); } else { px = r; py = 0; }
+        const c2 = Math.cos(o.r), s2 = Math.sin(o.r); auto.x += (px * c2 - py * s2) * o.s; auto.y += (px * s2 + py * c2) * o.s; hit = true; } } }
+  return hit; }
+function halte(id, k){ const e = $(id); const an = ev => { ev.preventDefault(); taste[k] = true; }, aus = ev => { ev.preventDefault(); taste[k] = false; }; e.addEventListener('pointerdown', an); e.addEventListener('pointerup', aus); e.addEventListener('pointerleave', aus); e.addEventListener('pointercancel', aus); }
+halte('gas', 'gas'); halte('bremse', 'bremse'); halte('li', 'li'); halte('re', 're');
+addEventListener('keydown', e => { taste[{ArrowUp: 'gas', w: 'gas', ArrowDown: 'bremse', s: 'bremse', ArrowLeft: 'li', a: 'li', ArrowRight: 're', d: 're'}[e.key]] = true; }); addEventListener('keyup', e => { taste[{ArrowUp: 'gas', w: 'gas', ArrowDown: 'bremse', s: 'bremse', ArrowLeft: 'li', a: 'li', ArrowRight: 're', d: 're'}[e.key]] = false; });
+$('bNacht').onclick = () => { nacht = !nacht; $('bNacht').textContent = nacht ? 'Tag' : 'Nacht'; licht(); };
+$('bSicht').onclick = () => { sichtI = (sichtI + 1) % SICHT.length; licht(); };
+let ortI = 0; $('bOrt').onclick = () => { const ks = Object.keys(PLAN.orte); ortI = (ortI + 1) % ks.length; const o = PLAN.orte[ks[ortI]]; auto.x = o[0] + 36; auto.y = o[1] + 40; auto.v = 0; $('bOrt').textContent = ks[ortI] + ' ▸'; };
+let tL = performance.now(), fps = 60, fpsN = 0, fpsT = 0, triSicht = 0;
+function schritt(t){ requestAnimationFrame(schritt); const dt = Math.min(0.05, (t - tL) / 1000); tL = t; fpsN++; fpsT += dt; if (fpsT > 0.5){ fps = fpsN / fpsT; fpsN = 0; fpsT = 0; }
+  const gas = taste.gas ? 1 : 0, br = taste.bremse ? 1 : 0; auto.v += (gas * 16 - br * (auto.v > 0.5 ? 26 : 9) - auto.v * 0.55) * dt; auto.v = Math.max(-9, Math.min(34, auto.v));
+  const lenk = (taste.li ? 1 : 0) - (taste.re ? 1 : 0); auto.a += lenk * dt * 1.9 * Math.max(-1, Math.min(1, auto.v / 7));
+  const ax = auto.x, ay = auto.y; auto.x += Math.cos(auto.a) * auto.v * dt; auto.y += Math.sin(auto.a) * auto.v * dt;
+  if (stoss()) auto.v *= 0.82;
+  if (PLAN){ if (!innen([auto.x, auto.y], PLAN.insel) && !innen([auto.x, auto.y], PLAN.kai)){ auto.x = ax; auto.y = ay; auto.v = 0; } auto.z += ((innen([auto.x, auto.y], PLAN.kai) ? 0.93 : 0.06) - auto.z) * Math.min(1, dt * 8); }
+  if (wagen){ wagen.position.copy(V3(auto.x, auto.y, auto.z)); wagen.rotation.y = auto.a; }
+  const R = SICHT[sichtI]; triSicht = 0; for (const g of chunks.values()){ const d = Math.hypot(g.userData.x - auto.x, g.userData.y - auto.y); g.visible = d < R + CH * 0.75; if (g.visible) triSicht += g.userData.tri; }
+  const hx = Math.cos(auto.a), hy = Math.sin(auto.a), ziel = V3(auto.x + hx * 6, auto.y + hy * 6, 1.5), kp = V3(auto.x - hx * 15, auto.y - hy * 15, 17); cam.position.lerp(kp, Math.min(1, dt * 4)); cam.lookAt(ziel);
+  renderer.render(scene, cam);
+  $('hud').innerHTML = 'Map v9 Vorschau · ' + fps.toFixed(0) + ' FPS<br>' + Math.round(triSicht / 1000) + 'k Dreiecke · ' + renderer.info.render.calls + ' Aufrufe<br>' + Math.round(auto.v * 3.6) + ' km/h · x ' + auto.x.toFixed(0) + ' y ' + auto.y.toFixed(0); }
+(async () => {
+  try {
+    const [P, idx, buf] = await Promise.all([fetch('map_plan.json').then(r => r.json()), fetch('map_objs.json').then(r => r.json()), fetch('map_objs.bin').then(r => r.arrayBuffer())]);
+    PLAN = P; boden(P); arten(idx, buf); const e = setzen(P); if (P.orte.hub){ auto.x = P.orte.hub[0] + 36; auto.y = P.orte.hub[1] + 40; }
+    if (ART.kompakt){ wagen = new THREE.Group(); if (ART.kompakt.gL) wagen.add(new THREE.Mesh(ART.kompakt.gL, matL)); if (ART.kompakt.gE) wagen.add(new THREE.Mesh(ART.kompakt.gE, matE)); scene.add(wagen); }
+    cam.position.copy(V3(auto.x - 15, auto.y, 17)); $('lade').remove(); window.KARTE = {n: e.n, fehlt: e.fehlt, arten: Object.keys(ART).length}; requestAnimationFrame(schritt);
+  } catch (err){ $('lade').textContent = 'Fehler beim Laden: ' + err; window.KARTE = {fehler: String(err)}; }
+})();
+</script></body></html>
